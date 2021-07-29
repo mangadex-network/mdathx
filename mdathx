@@ -1,0 +1,100 @@
+#!/usr/bin/env node
+
+const os = require('os');
+const path = require('path');
+const fs = require('fs-extra');
+const { spawn } = require('child_process');
+const fetch = require('node-fetch');
+
+const controller = 'https://api.mangadex.network';
+const configuration = {
+    secret: process.argv.find(arg => arg.startsWith('--key=')).split('=').pop(),
+    port: Number((process.argv.find(arg => arg.startsWith('--port=')) || '44300').split('=').pop()),
+    ip_address: undefined,
+    disk_space: Number((process.argv.find(arg => arg.startsWith('--cache=')) || '64').split('=').pop()) * 1073741824,
+    network_speed: 0,
+    build_version: 31,
+    tls_created_at: undefined
+}
+
+async function nginx(args) {
+    let message = '';
+    const process = spawn('nginx', args);
+    process.stderr.on('data', chunk => {
+        message += chunk;
+    });
+    return new Promise((resolve, reject) => {
+        process.on('close', code => {
+            if(code !== 0) {
+                console.log(new Date().toISOString(), '[ERROR] => nginx', args.join(' '), ` > exit=${code}`);
+                console.error('  > STDERR', message);
+                reject();
+            } else {
+                console.log(new Date().toISOString(), '[INFO] => nginx', args.join(' '));
+                resolve();
+            }
+        });
+    });
+}
+
+async function ping() {
+    const request = new fetch.Request(controller + '/ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(configuration)
+    });
+    const response = await fetch(request);
+    const data = await response.json();
+
+    console.log(new Date().toISOString(), '[INFO] =>', 'Ping Response from MangaDex@Home Remote API Server', [
+        '',
+        `  > Client: id=${data.client_id}, build=${configuration.build_version}/${data.latest_build}, paused=${data.paused}, compromised=${data.compromised}`,
+        `  > URL:    ${data.url}`,
+        `  > TLS:    ${data.tls ? data.tls.created_at : configuration.tls_created_at}`
+    ].join(os.EOL));
+
+    const updated = data.tls && data.tls.created_at !== configuration.tls_created_at;
+    if(updated) {
+        await fs.writeFile(path.join(__dirname, 'mdathx.crt'), data.tls.certificate);
+        await fs.writeFile(path.join(__dirname, 'mdathx.key'), data.tls.private_key);
+        configuration.tls_created_at = data.tls.created_at;
+        console.log(new Date().toISOString(), '[INFO] =>', `Assigned certificate (created ${configuration.tls_created_at})`);
+    }
+
+    return updated;
+}
+
+async function stop() {
+    const request = new fetch.Request(controller + '/ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(configuration)
+    });
+    const response = await fetch(request);
+    //const data = await response.json();
+    for(let remaining = 30; remaining > 0; remaining -= 5) {
+        console.log(new Date().toISOString(), '[INFO] =>', `Shutdown in ${remaining} seconds ...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+    await nginx([ '-s', 'stop' ]);
+}
+
+async function start() {
+    await ping(); // ping to ensure certificates are correctly created ...
+    await nginx([ '-p', __dirname, '-c', 'mdathx.conf' ]);
+    return setInterval(async () => {
+        if(await ping()) {
+            await nginx([ '-s', 'reload' ]);
+        }
+    }, 60_000);
+}
+
+(async function main() {
+    const keepalive = await start();
+    process.on('SIGINT', async () => {
+        console.log()
+        clearInterval(keepalive);
+        await stop();
+        process.exit();
+    });
+})();
