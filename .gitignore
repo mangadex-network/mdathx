@@ -2,4 +2,6 @@ node_modules
 cache
 mdathx.crt
 mdathx.key
+mdathx.run.conf
 package-lock.json
+*.log

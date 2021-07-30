@@ -8,13 +8,17 @@ const fetch = require('node-fetch');
 
 const controller = 'https://api.mangadex.network';
 const configuration = {
-    secret: process.argv.find(arg => arg.startsWith('--key=')).split('=').pop(),
-    port: Number((process.argv.find(arg => arg.startsWith('--port=')) || '44300').split('=').pop()),
+    secret: param('--key'),
+    port: Number(param('--port', '44300')),
     ip_address: undefined,
-    disk_space: Number((process.argv.find(arg => arg.startsWith('--cache=')) || '64').split('=').pop()) * 1073741824,
+    disk_space: Number(param('--size', '64')) * 1073741824,
     network_speed: 0,
     build_version: 31,
     tls_created_at: undefined
+}
+
+function param(option, fallback) {
+    return (process.argv.find(arg => arg.startsWith(option + '=')) || fallback || '').split('=').pop();
 }
 
 async function nginx(args) {
@@ -53,15 +57,14 @@ async function ping() {
         `  > TLS:    ${data.tls ? data.tls.created_at : configuration.tls_created_at}`
     ].join(os.EOL));
 
-    const updated = data.tls && data.tls.created_at !== configuration.tls_created_at;
-    if(updated) {
+    if(data.tls && data.tls.created_at !== configuration.tls_created_at) {
         await fs.writeFile(path.join(__dirname, 'mdathx.crt'), data.tls.certificate);
         await fs.writeFile(path.join(__dirname, 'mdathx.key'), data.tls.private_key);
         configuration.tls_created_at = data.tls.created_at;
         console.log(new Date().toISOString(), '[INFO] =>', `Assigned certificate (created ${configuration.tls_created_at})`);
     }
 
-    return updated;
+    return data;
 }
 
 async function stop() {
@@ -80,10 +83,19 @@ async function stop() {
 }
 
 async function start() {
-    await ping(); // ping to ensure certificates are correctly created ...
-    await nginx([ '-p', __dirname, '-c', 'mdathx.conf' ]);
+    const data = await ping(); // ping to ensure certificates are correctly created ...
+    let conf = await fs.readFile(path.join(__dirname, 'mdathx.conf'), 'utf8');
+    conf = conf
+        .replace(/%PORT%/g, configuration.port)
+        .replace(/%WORKERS%/g, os.cpus().length)
+        .replace(/%UPSTREAM%/g, data.image_server)
+        .replace(/%CACHE_SIZE%/g, configuration.disk_space)
+        .replace(/%CACHE_DIRECTORY%/g, param('--cache', './cache'));
+    await fs.writeFile(path.join(__dirname, 'mdathx.run.conf'), conf);
+    await nginx([ '-p', __dirname, '-e', 'error.log', '-c', 'mdathx.run.conf' ]);
     return setInterval(async () => {
-        if(await ping()) {
+        const data = await ping();
+        if(data.tls) {
             await nginx([ '-s', 'reload' ]);
         }
     }, 60_000);
