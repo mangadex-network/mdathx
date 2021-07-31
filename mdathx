@@ -103,7 +103,7 @@ async function start() {
 
 (async function main() {
     const keepalive = await start();
-    process.on('SIGINT', async () => {
+    process.once('SIGINT', async () => {
         console.log()
         clearInterval(keepalive);
         await stop();
