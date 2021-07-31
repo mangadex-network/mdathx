@@ -11,7 +11,6 @@ Verification of expiration tokens is not yet supported (and probably never will)
 curl -sL https://deb.nodesource.com/setup_14.x | sudo bash -
 apt-get update
 apt-get install -y nginx nodejs
-npm install
 # start
 ./mdathx --key=xxxxxxxx --port=44300 --cache=./cache --size=512 # --no-ssl
 # verify

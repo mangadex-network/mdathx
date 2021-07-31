@@ -2,12 +2,11 @@
 
 const os = require('os');
 const path = require('path');
-const fs = require('fs-extra');
+const https = require('https');
+const fs = require('fs').promises;
 const { spawn } = require('child_process');
-const fetch = require('node-fetch');
 
-const controller = 'https://api.mangadex.network';
-const configuration = {
+const settings = {
     secret: param('--key'),
     port: Number(param('--port', '44300')),
     ip_address: undefined,
@@ -19,6 +18,34 @@ const configuration = {
 
 function param(option, fallback) {
     return (process.argv.find(arg => arg.startsWith(option + '=')) || fallback || '').split('=').pop();
+}
+
+function post(path, payload) {
+    return new Promise((resolve, reject) => {
+        const body = JSON.stringify(payload || {});
+        const request = {
+            method: 'POST', hostname: 'api.mangadex.network', port: 443, path: path,
+            headers: {
+              'Content-Type': 'application/json',
+              'Content-Length': body.length
+            }
+        };
+        const connection = https.request(request, response => {
+            const chunks = [];
+            response.on('data', chunk => chunks.push(chunk))
+            response.on('end', () => {
+                response.json = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+                resolve(response);
+            });
+        });
+        connection.on('error', error => {
+            //connection.destroy();
+            //connection.abort();
+            reject(error);
+        });
+        connection.write(body);
+        connection.end();
+    });
 }
 
 async function nginx(args) {
@@ -42,72 +69,65 @@ async function nginx(args) {
 }
 
 async function ping() {
-    const request = new fetch.Request(controller + '/ping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(configuration)
-    });
-    const response = await fetch(request);
-    const data = await response.json();
-
-    console.log(new Date().toISOString(), '[INFO] =>', 'Ping Response from MangaDex@Home Remote API Server', [
-        '',
-        `  > Client: id=${data.client_id}, build=${configuration.build_version}/${data.latest_build}, paused=${data.paused}, compromised=${data.compromised}`,
-        `  > URL:    ${data.url}`,
-        `  > TLS:    ${data.tls ? data.tls.created_at : configuration.tls_created_at}`
+    const response = await post('/ping', settings);
+    const data = await response.json;
+    console.log(new Date().toISOString(), '[INFO] =>', 'PING MangaDex@Home Remote API Server:', response.statusCode, response.statusMessage, [ '',
+        `  > Client:  id=${data.client_id}, build=${settings.build_version}/${data.latest_build}, paused=${data.paused}, compromised=${data.compromised}`,
+        `  > Address: ${data.url}`,
+        `  > Origin:  ${data.image_server}`,
+        `  > TLS:     ${data.tls ? data.tls.created_at : settings.tls_created_at}`
     ].join(os.EOL));
-
-    if(data.tls && data.tls.created_at !== configuration.tls_created_at) {
+    if(data.tls && data.tls.created_at !== settings.tls_created_at) {
         await fs.writeFile(path.join(__dirname, 'mdathx.crt'), data.tls.certificate);
         await fs.writeFile(path.join(__dirname, 'mdathx.key'), data.tls.private_key);
-        configuration.tls_created_at = data.tls.created_at;
-        console.log(new Date().toISOString(), '[INFO] =>', `Assigned certificate (created ${configuration.tls_created_at})`);
+        settings.tls_created_at = data.tls.created_at;
+        console.log(new Date().toISOString(), '[INFO] =>', `Assigned certificate (created ${settings.tls_created_at})`);
     }
-
     return data;
 }
 
 async function stop() {
-    const request = new fetch.Request(controller + '/ping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(configuration)
+    process.once('SIGINT', async () => {
+        console.log();
+        await shutdown();
     });
-    const response = await fetch(request);
-    //const data = await response.json();
+    const response = await post('/ping', { secret: settings.secret });
+    console.log(new Date().toISOString(), '[INFO] =>', 'STOP MangaDex@Home Remote API Server:', response.statusCode, response.statusMessage);
     for(let remaining = 30; remaining > 0; remaining -= 5) {
         console.log(new Date().toISOString(), '[INFO] =>', `Shutdown in ${remaining} seconds ...`);
         await new Promise(resolve => setTimeout(resolve, 5000));
     }
+    await shutdown();
+}
+
+async function shutdown() {
     await nginx([ '-s', 'stop' ]);
+    process.exit();
 }
 
 async function start() {
     const data = await ping(); // ping to ensure certificates are correctly created ...
-    let conf = await fs.readFile(path.join(__dirname, 'mdathx.conf'), 'utf8');
-    conf = conf
-        .replace(/%PORT%/g, configuration.port)
+    const template = await fs.readFile(path.join(__dirname, 'mdathx.conf'), 'utf8');
+    const configuration = template
+        .replace(/%PORT%/g, settings.port)
         .replace(/%WORKERS%/g, os.cpus().length)
         .replace(/%UPSTREAM%/g, data.image_server)
-        .replace(/%CACHE_SIZE%/g, configuration.disk_space)
+        .replace(/%CACHE_SIZE%/g, settings.disk_space)
         .replace(/%CACHE_DIRECTORY%/g, param('--cache', './cache'))
         .replace(/%TLS%/, process.argv.includes('--no-ssl') ? '' : 'ssl  http2');
-    await fs.writeFile(path.join(__dirname, 'mdathx.run.conf'), conf);
+    await fs.writeFile(path.join(__dirname, 'mdathx.run.conf'), configuration);
     await nginx([ '-p', __dirname, '-c', 'mdathx.run.conf' ]);
-    return setInterval(async () => {
+    const keepalive = setInterval(async () => {
         const data = await ping();
         if(data.tls) {
             await nginx([ '-s', 'reload' ]);
         }
     }, 60_000);
+    process.once('SIGINT', async () => {
+        clearInterval(keepalive);
+        console.log();
+        await stop();
+    });
 }
 
-(async function main() {
-    const keepalive = await start();
-    process.once('SIGINT', async () => {
-        console.log()
-        clearInterval(keepalive);
-        await stop();
-        process.exit();
-    });
-})();
+start();

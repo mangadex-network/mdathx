@@ -1,9 +1,7 @@
 FROM alpine:latest
 WORKDIR /mdathx
-COPY ./mdathx ./mdathx.conf ./package.json ./
-RUN apk add --no-cache nginx nodejs npm \
-    && npm install --production \
-    && apk del npm \
+COPY ./mdathx ./mdathx.conf ./
+RUN apk add --no-cache nginx nodejs \
     && mkdir logs
 ENTRYPOINT ["/mdathx/mdathx", "--cache=/cache"]
-CMD ["--cache=64"]
+CMD ["--cache=64", "--port=44300"]
