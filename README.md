@@ -1,22 +1,29 @@
 # High Performance MangaDex@Home Client
 
-Based on nginx
+Proof of concept.
+Utilize the performance and stability of nginx as underlying server.
+Verification of expiration tokens is not yet supported (and probably never will).
 
-## Run (Ubuntu)
+## Setup (Ubuntu)
 
 ```bash
 # install dependencies
 curl -sL https://deb.nodesource.com/setup_14.x | sudo bash -
-apt-get install -y nginx nodejs apache2-utils
+apt-get update
+apt-get install -y nginx nodejs
 npm install
 # start
-./mdathx --key=xxxxxxxx --port=44300 --cache=./cache --size=512
+./mdathx --key=xxxxxxxx --port=44300 --cache=./cache --size=512 # --no-ssl
 # verify
+apt-get install -y curl
 curl --insecure -I 'https://127.0.0.1:44300/data/8172a46adc798f4f4ace6663322a383e/B18-8ceda4f88ddf0b2474b1017b6a3c822ea60d61e454f7e99e34af2cf2c9037b84.png'
 curl --insecure -I 'https://127.0.0.1:44300/-/data/8172a46adc798f4f4ace6663322a383e/B18-8ceda4f88ddf0b2474b1017b6a3c822ea60d61e454f7e99e34af2cf2c9037b84.png'
 # benchmark
+apt-get install -y apache2-utils
 ab -n 2500 -c 50 'https://127.0.0.1:44300/-/data/8172a46adc798f4f4ace6663322a383e/B18-8ceda4f88ddf0b2474b1017b6a3c822ea60d61e454f7e99e34af2cf2c9037b84.png'
 ```
+
+There are also some [docker images](https://hub.docker.com/r/mangadexnetwork/mdathx) available for playing around...
 
 ## Build (Docker)
 

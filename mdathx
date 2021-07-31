@@ -90,7 +90,8 @@ async function start() {
         .replace(/%WORKERS%/g, os.cpus().length)
         .replace(/%UPSTREAM%/g, data.image_server)
         .replace(/%CACHE_SIZE%/g, configuration.disk_space)
-        .replace(/%CACHE_DIRECTORY%/g, param('--cache', './cache'));
+        .replace(/%CACHE_DIRECTORY%/g, param('--cache', './cache'))
+        .replace(/%TLS%/, process.argv.includes('--no-ssl') ? '' : 'ssl  http2');
     await fs.writeFile(path.join(__dirname, 'mdathx.run.conf'), conf);
     await nginx([ '-p', __dirname, '-c', 'mdathx.run.conf' ]);
     return setInterval(async () => {
