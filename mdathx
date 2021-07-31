@@ -54,19 +54,20 @@ function post(path, payload) {
 }
 
 async function nginx(args) {
-    let message = '';
-    const process = spawn('nginx', args);
-    process.stderr.on('data', chunk => {
-        message += chunk;
-    });
     return new Promise((resolve, reject) => {
-        process.on('close', code => {
+        let stderr = '';
+        const process = spawn('nginx', args);
+        process.stderr.on('data', chunk => {
+            stderr += chunk;
+        });
+        process.once('exit', code => {
+            process.removeAllListeners('data');
             if(code !== 0) {
-                console.log(new Date().toISOString(), '[ERROR] => nginx', args.join(' '), ` > exit=${code}`);
-                console.error('  > STDERR', message);
+                console.error(new Date().toISOString(), '[ERROR] => nginx', args.join(' '), ` > exit=${code}`);
+                console.error('  > STDERR', stderr);
                 reject();
             } else {
-                console.log(new Date().toISOString(), '[INFO] => nginx', args.join(' '));
+                console.info(new Date().toISOString(), '[INFO] => nginx', args.join(' '));
                 resolve();
             }
         });
@@ -76,7 +77,7 @@ async function nginx(args) {
 async function ping() {
     const response = await post('/ping', settings);
     const data = await response.json;
-    console.log(new Date().toISOString(), '[INFO] =>', 'PING MangaDex@Home Remote API Server:', response.statusCode, response.statusMessage, [ '',
+    console.info(new Date().toISOString(), '[INFO] =>', 'PING MangaDex@Home Remote API Server:', response.statusCode, response.statusMessage, [ '',
         `  > Client:  id=${data.client_id}, build=${settings.build_version}/${data.latest_build}, paused=${data.paused}, compromised=${data.compromised}`,
         `  > Status:  ${metrics(data.url)}`,
         `  > Address: ${data.url}`,
@@ -87,20 +88,20 @@ async function ping() {
         await fs.writeFile(path.join(__dirname, 'mdathx.crt'), data.tls.certificate);
         await fs.writeFile(path.join(__dirname, 'mdathx.key'), data.tls.private_key);
         settings.tls_created_at = data.tls.created_at;
-        console.log(new Date().toISOString(), '[INFO] =>', `Assigned certificate (created ${settings.tls_created_at})`);
+        console.info(new Date().toISOString(), '[NOTICE] =>', `Received certificate (created ${settings.tls_created_at})`);
     }
     return data;
 }
 
 async function stop() {
     process.once('SIGINT', async () => {
-        console.log();
+        console.info();
         await shutdown();
     });
-    const response = await post('/ping', { secret: settings.secret });
-    console.log(new Date().toISOString(), '[INFO] =>', 'STOP MangaDex@Home Remote API Server:', response.statusCode, response.statusMessage);
+    const response = await post('/stop', { secret: settings.secret });
+    console.info(new Date().toISOString(), '[INFO] =>', 'STOP MangaDex@Home Remote API Server:', response.statusCode, response.statusMessage);
     for(let remaining = 30; remaining > 0; remaining -= 5) {
-        console.log(new Date().toISOString(), '[INFO] =>', `Shutdown in ${remaining} seconds ...`);
+        console.info(new Date().toISOString(), '[NOTICE] =>', `Shutdown in ${remaining} seconds ...`);
         await new Promise(resolve => setTimeout(resolve, 5000));
     }
     await shutdown();
@@ -132,7 +133,7 @@ async function start() {
     }, 60_000);
     process.once('SIGINT', async () => {
         clearInterval(keepalive);
-        console.log();
+        console.info();
         await stop();
     });
 }
