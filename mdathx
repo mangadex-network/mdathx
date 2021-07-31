@@ -3,6 +3,7 @@
 const os = require('os');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 const fs = require('fs').promises;
 const { spawn } = require('child_process');
 
@@ -18,6 +19,10 @@ const settings = {
 
 function param(option, fallback) {
     return (process.argv.find(arg => arg.startsWith(option + '=')) || fallback || '').split('=').pop();
+}
+
+function metrics(origin) {
+    return origin + '/' + crypto.createHash('md5').update(settings.secret).digest("hex").slice(-8);
 }
 
 function post(path, payload) {
@@ -73,6 +78,7 @@ async function ping() {
     const data = await response.json;
     console.log(new Date().toISOString(), '[INFO] =>', 'PING MangaDex@Home Remote API Server:', response.statusCode, response.statusMessage, [ '',
         `  > Client:  id=${data.client_id}, build=${settings.build_version}/${data.latest_build}, paused=${data.paused}, compromised=${data.compromised}`,
+        `  > Status:  ${metrics(data.url)}`,
         `  > Address: ${data.url}`,
         `  > Origin:  ${data.image_server}`,
         `  > TLS:     ${data.tls ? data.tls.created_at : settings.tls_created_at}`
@@ -114,7 +120,8 @@ async function start() {
         .replace(/%UPSTREAM%/g, data.image_server)
         .replace(/%CACHE_SIZE%/g, settings.disk_space)
         .replace(/%CACHE_DIRECTORY%/g, param('--cache', './cache'))
-        .replace(/%TLS%/, process.argv.includes('--no-ssl') ? '' : 'ssl  http2');
+        .replace(/%TLS%/, process.argv.includes('--no-ssl') ? '' : 'ssl  http2')
+        .replace(/%STATUS_ENDPOINT%/, metrics(''));
     await fs.writeFile(path.join(__dirname, 'mdathx.run.conf'), configuration);
     await nginx([ '-p', __dirname, '-c', 'mdathx.run.conf' ]);
     const keepalive = setInterval(async () => {
