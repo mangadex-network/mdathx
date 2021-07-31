@@ -92,7 +92,7 @@ async function start() {
         .replace(/%CACHE_SIZE%/g, configuration.disk_space)
         .replace(/%CACHE_DIRECTORY%/g, param('--cache', './cache'));
     await fs.writeFile(path.join(__dirname, 'mdathx.run.conf'), conf);
-    await nginx([ '-p', __dirname, '-e', 'error.log', '-c', 'mdathx.run.conf' ]);
+    await nginx([ '-p', __dirname, '-c', 'mdathx.run.conf' ]);
     return setInterval(async () => {
         const data = await ping();
         if(data.tls) {
